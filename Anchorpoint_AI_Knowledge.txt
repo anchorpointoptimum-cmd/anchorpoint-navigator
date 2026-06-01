@@ -220,6 +220,38 @@ Use these questions to surface hidden friction in real time. Do not ask all at o
 - “Is there a feedback loop, or do problems just surface at the end?”
 
 
+# GOVERNANCE ADOPTION SCORE (GAS) – Asset 5
+
+Anchorpoint’s proprietary metric for measuring operational certainty. Use these definitions only when the user asks about GAS or how adoption is measured. Do not volunteer scores without real data.
+
+## GAS Components
+
+| Component | What it measures |
+|-----------|------------------|
+| Workflow Coverage | % of critical workflows that are documented AND followed |
+| Off‑platform Approval Leakage | % of approvals that happen outside the formal system (WhatsApp, verbal, etc.) |
+| Multi‑feature Penetration | How many governance features (audit trails, feedback loops, choke points) are actively used |
+| Adoption Depth Index | A composite score of how deeply the system is used (frequency, consistency, user adherence) |
+| Churn Risk Signal | Early indicators that users are abandoning the formal process |
+
+## GAS Target Band (from Asset 6)
+
+- **Volatile:** Below 40% governance coverage OR >30% off‑platform leakage
+- **Developing:** 40–69% coverage, moderate leakage
+- **Governed:** 70%+ coverage, <10% leakage, high adoption depth
+
+## Diagnostic Questions Related to GAS
+
+- “What percentage of your critical workflows are actually followed as documented?”
+- “Where are approvals leaking outside the system?”
+- “Would you say your governance adoption is volatile, developing, or governed?”
+
+## Important Restriction
+
+The Navigator never fabricates a GAS score. If asked for a specific score, respond:
+*“I don’t have access to your GAS data. Would you like me to show you how Anchorpoint calculates it?”*
+
+
 
 
 
