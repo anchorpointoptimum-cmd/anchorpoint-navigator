@@ -1,11 +1,93 @@
 import streamlit as st
 import os
 import uuid
+import sqlite3
+import json
+from datetime import datetime
 from groq import Groq
 
 st.set_page_config(page_title="Anchorpoint Navigator", page_icon="⚓")
 st.title("Anchorpoint AI Navigator")
 st.caption("Diagnosing operational gaps. Stewarding certainty.")
+
+# --- Database setup ---
+def init_db():
+    conn = sqlite3.connect('conversations.db')
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS sessions
+                 (session_id TEXT PRIMARY KEY, created_at TIMESTAMP, last_active TIMESTAMP)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS messages
+                 (id TEXT PRIMARY KEY, session_id TEXT, role TEXT, content TEXT, 
+                  parent_id TEXT, timestamp TIMESTAMP, FOREIGN KEY(session_id) REFERENCES sessions(session_id))''')
+    conn.commit()
+    conn.close()
+
+def get_or_create_session():
+    # Check URL parameter for session_id
+    query_params = st.query_params
+    session_id = query_params.get("session", None)
+    
+    if session_id:
+        # Verify session exists in DB
+        conn = sqlite3.connect('conversations.db')
+        c = conn.cursor()
+        c.execute("SELECT session_id FROM sessions WHERE session_id = ?", (session_id,))
+        if c.fetchone():
+            # Update last_active
+            c.execute("UPDATE sessions SET last_active = ? WHERE session_id = ?", 
+                     (datetime.now(), session_id))
+            conn.commit()
+            conn.close()
+            return session_id
+        conn.close()
+    
+    # Check local storage via JavaScript
+    if "session_id" not in st.session_state:
+        # Generate new session
+        new_session = str(uuid.uuid4())
+        st.session_state.session_id = new_session
+        conn = sqlite3.connect('conversations.db')
+        c = conn.cursor()
+        c.execute("INSERT INTO sessions (session_id, created_at, last_active) VALUES (?, ?, ?)",
+                 (new_session, datetime.now(), datetime.now()))
+        conn.commit()
+        conn.close()
+        # Set URL parameter
+        st.query_params["session"] = new_session
+        return new_session
+    else:
+        return st.session_state.session_id
+
+def save_message(message_id, session_id, role, content, parent_id):
+    conn = sqlite3.connect('conversations.db')
+    c = conn.cursor()
+    c.execute("INSERT OR REPLACE INTO messages (id, session_id, role, content, parent_id, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
+             (message_id, session_id, role, content, parent_id, datetime.now()))
+    conn.commit()
+    conn.close()
+
+def load_conversation(session_id):
+    conn = sqlite3.connect('conversations.db')
+    c = conn.cursor()
+    c.execute("SELECT id, role, content, parent_id FROM messages WHERE session_id = ? ORDER BY timestamp", (session_id,))
+    rows = c.fetchall()
+    conn.close()
+    
+    conversation = []
+    for row in rows:
+        conversation.append({
+            "id": row[0],
+            "role": row[1],
+            "content": row[2],
+            "parent_id": row[3]
+        })
+    return conversation
+
+# Initialize DB
+init_db()
+
+# Get or create session
+session_id = get_or_create_session()
 
 # Show intro message only once per session
 if "intro_shown" not in st.session_state:
@@ -20,20 +102,17 @@ At the end, I'll give you a one‑page summary you can screenshot or share:
 
 No jargon. No rushed solutions. Just clarity.
 
-Ready? Describe your process or challenge below."""
-    
+**✨ New in v2:** Your conversation is saved automatically. Share this link to continue the same conversation on another device:
+`https://anchorpoint-navigator.streamlit.app/?session=`""" + session_id
+
     st.info(intro_message)
     
     st.markdown("""
     ***
-    **💡 Tip:** You can add helpful context to any answer, like:
-    - *"The store manager is often away on Mondays"*
-    - *"This happens mostly during night shifts"*
-    - *"We've tried fixing this before but it didn't stick"*
-    
-    Just type your context in the same message as your answer.
-    
-    **✏️ New:** You can now edit any of your previous messages by clicking the edit button next to it.
+    **💡 Tips:**
+    - Add context like *"The manager is often away on Mondays"* in your answers
+    - Click **✏️** next to any of your messages to edit and re-diagnose
+    - Bookmark this page to return to this conversation later
     ***
     """)
     
@@ -46,16 +125,28 @@ client = Groq(api_key=api_key)
 with open("Anchorpoint_AI_Knowledge.txt", "r") as f:
     system_content = f.read()
 
-# Initialize conversation as a list of messages with metadata
-if "conversation" not in st.session_state:
-    st.session_state.conversation = [
-        {
+# Load existing conversation from DB
+if "conversation_loaded" not in st.session_state:
+    db_conversation = load_conversation(session_id)
+    if db_conversation:
+        # Add system message at the beginning
+        system_msg = {
             "id": str(uuid.uuid4()),
             "role": "system",
             "content": system_content + "\n\nRemember: You are a Navigator. Lead with questions.",
             "parent_id": None
         }
-    ]
+        st.session_state.conversation = [system_msg] + db_conversation
+    else:
+        st.session_state.conversation = [
+            {
+                "id": str(uuid.uuid4()),
+                "role": "system",
+                "content": system_content + "\n\nRemember: You are a Navigator. Lead with questions.",
+                "parent_id": None
+            }
+        ]
+    st.session_state.conversation_loaded = True
 
 # Track edit state
 if "editing_message_id" not in st.session_state:
@@ -63,7 +154,6 @@ if "editing_message_id" not in st.session_state:
 
 def regenerate_from_message(message_id):
     """Delete all messages after the given message ID and regenerate responses."""
-    # Find index of message to edit from
     idx = None
     for i, msg in enumerate(st.session_state.conversation):
         if msg["id"] == message_id:
@@ -73,6 +163,14 @@ def regenerate_from_message(message_id):
     if idx is not None:
         # Keep messages up to and including the edited message
         st.session_state.conversation = st.session_state.conversation[:idx + 1]
+        
+        # Delete from database
+        conn = sqlite3.connect('conversations.db')
+        c = conn.cursor()
+        c.execute("DELETE FROM messages WHERE session_id = ? AND timestamp > (SELECT timestamp FROM messages WHERE id = ?)",
+                 (session_id, message_id))
+        conn.commit()
+        conn.close()
         
         # Regenerate responses from this point
         conversation_for_api = []
@@ -96,6 +194,8 @@ def regenerate_from_message(message_id):
                 "parent_id": message_id
             }
             st.session_state.conversation.append(assistant_msg)
+            save_message(assistant_msg["id"], session_id, assistant_msg["role"], 
+                        assistant_msg["content"], assistant_msg["parent_id"])
         
         st.rerun()
 
@@ -128,6 +228,8 @@ if st.session_state.editing_message_id:
             if submitted:
                 # Update the message content
                 msg_to_edit["content"] = edited_content
+                save_message(msg_to_edit["id"], session_id, msg_to_edit["role"], 
+                           edited_content, msg_to_edit["parent_id"])
                 # Regenerate from this point
                 regenerate_from_message(msg_to_edit["id"])
                 st.session_state.editing_message_id = None
@@ -148,6 +250,7 @@ if not st.session_state.editing_message_id:
             "parent_id": st.session_state.conversation[-1]["id"] if st.session_state.conversation else None
         }
         st.session_state.conversation.append(user_msg)
+        save_message(user_msg["id"], session_id, user_msg["role"], user_msg["content"], user_msg["parent_id"])
         
         # Prepare API messages (linear, from root to latest)
         api_messages = []
@@ -172,10 +275,27 @@ if not st.session_state.editing_message_id:
                 "parent_id": user_msg["id"]
             }
             st.session_state.conversation.append(assistant_msg)
+            save_message(assistant_msg["id"], session_id, assistant_msg["role"], 
+                        assistant_msg["content"], assistant_msg["parent_id"])
         
         st.rerun()
 
-# End-of-conversation summary (simplified for v2)
+# New conversation button
+if len(st.session_state.conversation) > 1:
+    st.sidebar.divider()
+    if st.sidebar.button("🆕 Start New Conversation"):
+        # Create new session
+        new_session = str(uuid.uuid4())
+        st.query_params["session"] = new_session
+        st.session_state.clear()
+        st.rerun()
+    
+    # Show current session ID for sharing
+    st.sidebar.caption(f"Session ID: `{session_id[:8]}...`")
+    st.sidebar.caption("Share this link to continue the same conversation:")
+    st.sidebar.code(f"{st.get_option('server.baseUrlPath')}?session={session_id}")
+
+# End-of-conversation summary
 if len([m for m in st.session_state.conversation if m["role"] == "assistant"]) >= 3:
     if "summary_generated" not in st.session_state:
         st.divider()
