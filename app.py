@@ -78,6 +78,51 @@ st.markdown("""
         background-color: #ffffff !important;
         color: #111111 !important;
     }
+    /* Voice input row styling */
+    .voice-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+        background: #f8fafc;
+        padding: 6px 12px;
+        border-radius: 8px;
+        border: 1px solid #e2e8f0;
+    }
+    .voice-row input {
+        flex: 1;
+        border: none;
+        background: transparent;
+        padding: 8px 0;
+        font-size: 0.95rem;
+        outline: none;
+        color: #1e293b;
+    }
+    .voice-row button {
+        background: #1a3e60;
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        font-size: 20px;
+        cursor: pointer;
+        transition: background 0.2s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .voice-row button:hover {
+        background: #2c5a7a;
+    }
+    .voice-row button:active {
+        background: #d4af37;
+    }
+    .voice-row .status {
+        font-size: 0.8rem;
+        color: #64748b;
+        min-width: 120px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -861,40 +906,33 @@ if st.session_state.edit_msg_id:
         st.session_state.edit_msg_id = None
         st.rerun()
 
-# ========== VOICE INPUT COMPONENT (placed before chat input) ==========
+# ========== VOICE INPUT ROW ==========
 voice_html = """
-<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-    <button id="micBtn" style="
-        background-color: #1a3e60;
-        color: white;
-        border: none;
-        border-radius: 50%;
-        width: 48px;
-        height: 48px;
-        font-size: 24px;
-        cursor: pointer;
-        transition: background-color 0.2s;
-    " onmousedown="startRecording()" onmouseup="stopRecording()" ontouchstart="startRecording()" ontouchend="stopRecording()">
+<div class="voice-row">
+    <input type="text" id="voiceInput" placeholder="Speak or type..." />
+    <button id="micBtn" title="Hold to speak">
         🎤
     </button>
-    <span id="status" style="font-size: 0.9rem; color: #334155;">Hold to speak</span>
+    <span class="status" id="status">Hold to speak</span>
 </div>
 
 <script>
+    const micBtn = document.getElementById('micBtn');
+    const voiceInput = document.getElementById('voiceInput');
+    const statusEl = document.getElementById('status');
     let recognition = null;
     let finalTranscript = '';
-    const statusEl = document.getElementById('status');
-    const micBtn = document.getElementById('micBtn');
+    let isRecording = false;
 
     function startRecording() {
         if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-            statusEl.textContent = 'Speech recognition not supported in this browser.';
+            statusEl.textContent = 'Not supported';
             return;
         }
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         recognition = new SpeechRecognition();
         recognition.lang = 'en-US';
-        recognition.continuous = true;
+        recognition.continuous = false;
         recognition.interimResults = true;
         recognition.maxAlternatives = 1;
 
@@ -909,43 +947,83 @@ voice_html = """
                 }
             }
             statusEl.textContent = '🎙️ Listening... ' + interim;
+            voiceInput.value = finalTranscript + interim;
         };
 
         recognition.onend = function() {
             if (finalTranscript.trim()) {
-                // Set the chat input textarea value
-                const chatInput = document.querySelector('[data-testid="stChatInput"] textarea');
-                if (chatInput) {
-                    chatInput.value = finalTranscript.trim();
-                    chatInput.dispatchEvent(new Event('input', { bubbles: true }));
-                    statusEl.textContent = '✅ Ready – press Enter to send';
-                } else {
-                    statusEl.textContent = '✅ Done – paste into chat';
-                }
+                voiceInput.value = finalTranscript.trim();
+                statusEl.textContent = '✅ Ready – click Send';
             } else {
                 statusEl.textContent = 'Hold to speak';
             }
             recognition = null;
+            isRecording = false;
         };
 
         recognition.start();
+        isRecording = true;
         statusEl.textContent = '🎙️ Recording...';
     }
 
     function stopRecording() {
-        if (recognition) {
+        if (recognition && isRecording) {
             recognition.stop();
         }
     }
+
+    micBtn.addEventListener('mousedown', startRecording);
+    micBtn.addEventListener('mouseup', stopRecording);
+    micBtn.addEventListener('mouseleave', stopRecording);
+    micBtn.addEventListener('touchstart', startRecording);
+    micBtn.addEventListener('touchend', stopRecording);
+
+    // Also allow Enter key to submit via the Send button (we'll handle in Streamlit)
 </script>
 """
 
-# Inject the voice component
-st.components.v1.html(voice_html, height=80)
+# Inject the voice row
+st.components.v1.html(voice_html, height=60)
 
 # ========== CHAT INPUT (with context injection) ==========
 if not st.session_state.edit_msg_id:
-    if prompt := st.chat_input("Describe an operational process or challenge..."):
+    # We'll add a text input and send button for voice, plus the chat input for typing.
+    # We'll use a form to handle both.
+    with st.form(key="voice_form", clear_on_submit=True):
+        voice_text = st.text_input("", placeholder="Type or speak your message...", key="voice_message")
+        col1, col2 = st.columns([1, 10])
+        with col1:
+            submitted = st.form_submit_button("Send")
+        if submitted and voice_text:
+            # Process the message as if it came from the chat input
+            if st.session_state.pending_context:
+                full_prompt = f"[Context provided: {st.session_state.pending_context}]\n\nUser: {voice_text}"
+                st.session_state.pending_context = None
+            else:
+                full_prompt = voice_text
+            user_msg = {"id": str(uuid.uuid4()), "role": "user", "content": full_prompt}
+            st.session_state.messages.append(user_msg)
+            with st.spinner("Diagnosing..."):
+                reply = get_assistant_response(st.session_state.messages)
+            assistant_msg = {"id": str(uuid.uuid4()), "role": "assistant", "content": reply, "parent_id": user_msg["id"]}
+            st.session_state.messages.append(assistant_msg)
+            if st.session_state.auth_user:
+                if not st.session_state.current_conv_id:
+                    create_new_conversation()
+                else:
+                    save_conversation_messages(st.session_state.current_conv_id, st.session_state.messages)
+                    user_msgs = [m for m in st.session_state.messages if m["role"] == "user"]
+                    if len(user_msgs) == 1:
+                        title = user_msgs[0]["content"][:40] + ("..." if len(user_msgs[0]["content"]) > 40 else "")
+                        update_conversation_title(st.session_state.current_conv_id, title)
+                    load_user_conversations()
+            else:
+                if len([m for m in st.session_state.messages if m["role"] == "user"]) == 1:
+                    st.info("💡 You're in guest mode. Create an account to add this conversation to your governance profile.")
+            st.rerun()
+
+    # Keep the original chat input for typing (optional – you can remove if you only want the voice row)
+    if prompt := st.chat_input("Or type here..."):
         if st.session_state.pending_context:
             full_prompt = f"[Context provided: {st.session_state.pending_context}]\n\nUser: {prompt}"
             st.session_state.pending_context = None
