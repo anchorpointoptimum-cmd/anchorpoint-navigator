@@ -77,50 +77,6 @@ st.markdown("""
         background-color: #ffffff !important;
         color: #111111 !important;
     }
-    .mic-row {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-bottom: 8px;
-        background: #f8fafc;
-        padding: 6px 12px;
-        border-radius: 8px;
-        border: 1px solid #e2e8f0;
-    }
-    .mic-row input {
-        flex: 1;
-        border: none;
-        background: transparent;
-        padding: 8px 0;
-        font-size: 0.95rem;
-        outline: none;
-        color: #1e293b;
-    }
-    .mic-row button {
-        background: #1a3e60;
-        color: white;
-        border: none;
-        border-radius: 50%;
-        width: 40px;
-        height: 40px;
-        font-size: 20px;
-        cursor: pointer;
-        transition: background 0.2s;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-    .mic-row button:hover {
-        background: #2c5a7a;
-    }
-    .mic-row button:active {
-        background: #d4af37;
-    }
-    .mic-row .status {
-        font-size: 0.8rem;
-        color: #64748b;
-        min-width: 120px;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -904,14 +860,14 @@ if st.session_state.edit_msg_id:
         st.session_state.edit_msg_id = None
         st.rerun()
 
-# ========== SIMPLIFIED VOICE INPUT ==========
+# ========== SIMPLIFIED VOICE INPUT (pure Streamlit + minimal JS) ==========
+# We'll use a st.form with a text input and a microphone button that uses JS to fill the input.
+# The JS will be embedded via st.components.v1.html, but we'll keep it minimal.
 voice_html = """
-<div class="mic-row">
-    <input type="text" id="voiceInput" placeholder="Speak or type your message..." />
-    <button id="micBtn" title="Hold to speak">
-        🎤
-    </button>
-    <span class="status" id="micStatus">Hold to speak</span>
+<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px; background: #f8fafc; padding: 6px 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
+    <input type="text" id="voiceInput" placeholder="Speak or type your message..." style="flex: 1; border: none; background: transparent; padding: 8px 0; font-size: 0.95rem; outline: none; color: #1e293b;" />
+    <button id="micBtn" style="background: #1a3e60; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 20px; cursor: pointer; transition: background 0.2s; display: flex; align-items: center; justify-content: center;">🎤</button>
+    <span id="micStatus" style="font-size: 0.8rem; color: #64748b; min-width: 120px;">Hold to speak</span>
 </div>
 
 <script>
@@ -921,19 +877,6 @@ voice_html = """
     let recognition = null;
     let finalTranscript = '';
     let isRecording = false;
-
-    function findChatInput() {
-        const textarea = document.querySelector('[data-testid="stChatInput"] textarea');
-        if (!textarea) {
-            const container = document.querySelector('[data-testid="stChatInput"]');
-            if (container) {
-                const input = container.querySelector('input, textarea');
-                if (input) return input;
-            }
-            return null;
-        }
-        return textarea;
-    }
 
     function startRecording() {
         if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
@@ -964,13 +907,7 @@ voice_html = """
         recognition.onend = function() {
             if (finalTranscript.trim()) {
                 voiceInput.value = finalTranscript.trim();
-                statusEl.textContent = '✅ Ready – press Enter or click Send';
-                // Optionally fill the Streamlit chat input
-                const chatInput = findChatInput();
-                if (chatInput) {
-                    chatInput.value = finalTranscript.trim();
-                    chatInput.dispatchEvent(new Event('input', { bubbles: true }));
-                }
+                statusEl.textContent = '✅ Ready – click Send';
             } else {
                 statusEl.textContent = 'Hold to speak';
             }
@@ -994,11 +931,10 @@ voice_html = """
     micBtn.addEventListener('mouseleave', stopRecording);
     micBtn.addEventListener('touchstart', startRecording);
     micBtn.addEventListener('touchend', stopRecording);
-
-    // Allow Enter key to submit via the chat input (Streamlit handles it)
 </script>
 """
 
+# Inject the voice component
 st.markdown(voice_html, unsafe_allow_html=True)
 
 # ========== CHAT INPUT ==========
