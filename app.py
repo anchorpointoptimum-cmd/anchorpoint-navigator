@@ -860,82 +860,92 @@ if st.session_state.edit_msg_id:
         st.session_state.edit_msg_id = None
         st.rerun()
 
-# ========== SIMPLIFIED VOICE INPUT (pure Streamlit + minimal JS) ==========
-# We'll use a st.form with a text input and a microphone button that uses JS to fill the input.
-# The JS will be embedded via st.components.v1.html, but we'll keep it minimal.
+# ========== VOICE INPUT (modified with retry and debug) ==========
 voice_html = """
-<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px; background: #f8fafc; padding: 6px 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
+<div id="voiceComponent" style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px; background: #f8fafc; padding: 6px 12px; border-radius: 8px; border: 1px solid #e2e8f0;">
     <input type="text" id="voiceInput" placeholder="Speak or type your message..." style="flex: 1; border: none; background: transparent; padding: 8px 0; font-size: 0.95rem; outline: none; color: #1e293b;" />
     <button id="micBtn" style="background: #1a3e60; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 20px; cursor: pointer; transition: background 0.2s; display: flex; align-items: center; justify-content: center;">🎤</button>
     <span id="micStatus" style="font-size: 0.8rem; color: #64748b; min-width: 120px;">Hold to speak</span>
 </div>
 
 <script>
-    const micBtn = document.getElementById('micBtn');
-    const voiceInput = document.getElementById('voiceInput');
-    const statusEl = document.getElementById('micStatus');
-    let recognition = null;
-    let finalTranscript = '';
-    let isRecording = false;
+    (function() {
+        function initVoice() {
+            const micBtn = document.getElementById('micBtn');
+            const voiceInput = document.getElementById('voiceInput');
+            const statusEl = document.getElementById('micStatus');
+            if (!micBtn || !voiceInput || !statusEl) {
+                setTimeout(initVoice, 200);
+                return;
+            }
+            let recognition = null;
+            let finalTranscript = '';
+            let isRecording = false;
 
-    function startRecording() {
-        if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-            statusEl.textContent = 'Not supported in this browser.';
-            return;
-        }
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        recognition = new SpeechRecognition();
-        recognition.lang = 'en-US';
-        recognition.continuous = false;
-        recognition.interimResults = true;
-        recognition.maxAlternatives = 1;
+            function startRecording() {
+                if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+                    statusEl.textContent = 'Not supported in this browser.';
+                    return;
+                }
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                recognition = new SpeechRecognition();
+                recognition.lang = 'en-US';
+                recognition.continuous = false;
+                recognition.interimResults = true;
+                recognition.maxAlternatives = 1;
 
-        finalTranscript = '';
-        recognition.onresult = function(event) {
-            let interim = '';
-            for (let i = event.resultIndex; i < event.results.length; i++) {
-                if (event.results[i].isFinal) {
-                    finalTranscript += event.results[i][0].transcript;
-                } else {
-                    interim += event.results[i][0].transcript;
+                finalTranscript = '';
+                recognition.onresult = function(event) {
+                    let interim = '';
+                    for (let i = event.resultIndex; i < event.results.length; i++) {
+                        if (event.results[i].isFinal) {
+                            finalTranscript += event.results[i][0].transcript;
+                        } else {
+                            interim += event.results[i][0].transcript;
+                        }
+                    }
+                    voiceInput.value = finalTranscript + interim;
+                    statusEl.textContent = '🎙️ Listening...';
+                };
+
+                recognition.onend = function() {
+                    if (finalTranscript.trim()) {
+                        voiceInput.value = finalTranscript.trim();
+                        statusEl.textContent = '✅ Ready – press Enter or Send';
+                    } else {
+                        statusEl.textContent = 'Hold to speak';
+                    }
+                    recognition = null;
+                    isRecording = false;
+                };
+
+                recognition.start();
+                isRecording = true;
+                statusEl.textContent = '🎙️ Recording...';
+            }
+
+            function stopRecording() {
+                if (recognition && isRecording) {
+                    recognition.stop();
                 }
             }
-            voiceInput.value = finalTranscript + interim;
-            statusEl.textContent = '🎙️ Listening...';
-        };
 
-        recognition.onend = function() {
-            if (finalTranscript.trim()) {
-                voiceInput.value = finalTranscript.trim();
-                statusEl.textContent = '✅ Ready – click Send';
-            } else {
-                statusEl.textContent = 'Hold to speak';
-            }
-            recognition = null;
-            isRecording = false;
-        };
-
-        recognition.start();
-        isRecording = true;
-        statusEl.textContent = '🎙️ Recording...';
-    }
-
-    function stopRecording() {
-        if (recognition && isRecording) {
-            recognition.stop();
+            micBtn.addEventListener('mousedown', startRecording);
+            micBtn.addEventListener('mouseup', stopRecording);
+            micBtn.addEventListener('mouseleave', stopRecording);
+            micBtn.addEventListener('touchstart', startRecording);
+            micBtn.addEventListener('touchend', stopRecording);
         }
-    }
 
-    micBtn.addEventListener('mousedown', startRecording);
-    micBtn.addEventListener('mouseup', stopRecording);
-    micBtn.addEventListener('mouseleave', stopRecording);
-    micBtn.addEventListener('touchstart', startRecording);
-    micBtn.addEventListener('touchend', stopRecording);
+        initVoice();
+    })();
 </script>
 """
 
-# Inject the voice component
 st.markdown(voice_html, unsafe_allow_html=True)
+
+# ========== DEBUG LINE ==========
+st.write("🔴 Voice component injected above this line")
 
 # ========== CHAT INPUT ==========
 if not st.session_state.edit_msg_id:
