@@ -13,7 +13,6 @@ import re
 
 # ========== PASSWORD PROTECTION ==========
 def check_password():
-    """Returns True if the user enters the correct password."""
     def password_entered():
         if hashlib.sha256(st.session_state["password"].encode()).hexdigest() == st.secrets["password_hash"]:
             st.session_state["password_correct"] = True
@@ -78,37 +77,48 @@ st.markdown("""
         background-color: #ffffff !important;
         color: #111111 !important;
     }
-    /* Microphone button alignment */
-    .mic-container {
+    .mic-row {
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: 8px;
         margin-bottom: 8px;
-        padding: 4px 0;
+        background: #f8fafc;
+        padding: 6px 12px;
+        border-radius: 8px;
+        border: 1px solid #e2e8f0;
     }
-    .mic-container button {
-        background-color: #1a3e60;
+    .mic-row input {
+        flex: 1;
+        border: none;
+        background: transparent;
+        padding: 8px 0;
+        font-size: 0.95rem;
+        outline: none;
+        color: #1e293b;
+    }
+    .mic-row button {
+        background: #1a3e60;
         color: white;
         border: none;
         border-radius: 50%;
-        width: 48px;
-        height: 48px;
-        font-size: 24px;
+        width: 40px;
+        height: 40px;
+        font-size: 20px;
         cursor: pointer;
         transition: background 0.2s;
         display: flex;
         align-items: center;
         justify-content: center;
     }
-    .mic-container button:hover {
-        background-color: #2c5a7a;
+    .mic-row button:hover {
+        background: #2c5a7a;
     }
-    .mic-container button:active {
-        background-color: #d4af37;
+    .mic-row button:active {
+        background: #d4af37;
     }
-    .mic-container .status {
-        font-size: 0.9rem;
-        color: #334155;
+    .mic-row .status {
+        font-size: 0.8rem;
+        color: #64748b;
         min-width: 120px;
     }
 </style>
@@ -834,7 +844,7 @@ with st.sidebar:
         if st.session_state.messages:
             st.caption("Guest session (intelligence not persisted)")
 
-# ========== MAIN CHAT AREA (with context capture) ==========
+# ========== MAIN CHAT AREA ==========
 if st.session_state.messages:
     for idx, msg in enumerate(st.session_state.messages):
         if msg["role"] == "system":
@@ -849,7 +859,7 @@ if st.session_state.messages:
                 if idx == len(st.session_state.messages) - 1 and st.session_state.context_shown_for != msg["id"]:
                     with st.form(key=f"context_form_{msg['id']}"):
                         context = st.text_area(
-                            "Optional: Add context to help me understand better (e.g., 'The manager is often away on Mondays')",
+                            "Optional: Add context to help me understand better",
                             key=f"context_{msg['id']}",
                             placeholder="e.g., The store manager is often away on Mondays, so the team uses WhatsApp."
                         )
@@ -894,27 +904,27 @@ if st.session_state.edit_msg_id:
         st.session_state.edit_msg_id = None
         st.rerun()
 
-# ========== VOICE INPUT COMPONENT (reliable version) ==========
+# ========== SIMPLIFIED VOICE INPUT ==========
 voice_html = """
-<div class="mic-container">
-    <button id="micButton" title="Hold to speak">
+<div class="mic-row">
+    <input type="text" id="voiceInput" placeholder="Speak or type your message..." />
+    <button id="micBtn" title="Hold to speak">
         🎤
     </button>
     <span class="status" id="micStatus">Hold to speak</span>
 </div>
 
 <script>
-    const micBtn = document.getElementById('micButton');
+    const micBtn = document.getElementById('micBtn');
+    const voiceInput = document.getElementById('voiceInput');
     const statusEl = document.getElementById('micStatus');
     let recognition = null;
     let finalTranscript = '';
     let isRecording = false;
 
     function findChatInput() {
-        // Find the chat input textarea (Streamlit's chat_input component)
         const textarea = document.querySelector('[data-testid="stChatInput"] textarea');
         if (!textarea) {
-            // Fallback: try to find any text input inside the chat input container
             const container = document.querySelector('[data-testid="stChatInput"]');
             if (container) {
                 const input = container.querySelector('input, textarea');
@@ -927,7 +937,7 @@ voice_html = """
 
     function startRecording() {
         if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-            statusEl.textContent = 'Not supported';
+            statusEl.textContent = 'Not supported in this browser.';
             return;
         }
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -947,23 +957,20 @@ voice_html = """
                     interim += event.results[i][0].transcript;
                 }
             }
-            statusEl.textContent = '🎙️ Listening... ' + interim;
-            // Update chat input in real-time
-            const chatInput = findChatInput();
-            if (chatInput) {
-                chatInput.value = finalTranscript + interim;
-                chatInput.dispatchEvent(new Event('input', { bubbles: true }));
-            }
+            voiceInput.value = finalTranscript + interim;
+            statusEl.textContent = '🎙️ Listening...';
         };
 
         recognition.onend = function() {
             if (finalTranscript.trim()) {
+                voiceInput.value = finalTranscript.trim();
+                statusEl.textContent = '✅ Ready – press Enter or click Send';
+                // Optionally fill the Streamlit chat input
                 const chatInput = findChatInput();
                 if (chatInput) {
                     chatInput.value = finalTranscript.trim();
                     chatInput.dispatchEvent(new Event('input', { bubbles: true }));
                 }
-                statusEl.textContent = '✅ Ready – press Enter to send';
             } else {
                 statusEl.textContent = 'Hold to speak';
             }
@@ -987,6 +994,8 @@ voice_html = """
     micBtn.addEventListener('mouseleave', stopRecording);
     micBtn.addEventListener('touchstart', startRecording);
     micBtn.addEventListener('touchend', stopRecording);
+
+    // Allow Enter key to submit via the chat input (Streamlit handles it)
 </script>
 """
 
@@ -1021,6 +1030,42 @@ if not st.session_state.edit_msg_id:
         else:
             if len([m for m in st.session_state.messages if m["role"] == "user"]) == 1:
                 st.info("💡 You're in guest mode. Create an account to add this conversation to your governance profile.")
+        st.rerun()
+
+# ========== THINK MODE ==========
+user_count = len([m for m in st.session_state.messages if m["role"] == "user"])
+if user_count >= 2:
+    st.divider()
+    if st.button("💭 Think", key="think_button", use_container_width=True):
+        with st.spinner("Synthesising patterns..."):
+            conv_text = ""
+            for m in st.session_state.messages:
+                if m["role"] != "system":
+                    conv_text += f"{m['role'].upper()}: {m['content']}\n\n"
+            think_prompt = f"""Review this conversation and provide a brief synthesis. Include:
+- Patterns you're noticing (at least 1)
+- Possible persistence drivers
+- Recurring themes or gaps
+- A reflective question to explore deeper
+
+Conversation:
+{conv_text}
+
+Respond in a clear, structured format with bullet points or short sections."""
+            think_response = groq_client.chat.completions.create(
+                model="llama-3.1-8b-instant",
+                messages=[{"role": "user", "content": think_prompt}],
+                temperature=0.4,
+                max_tokens=400
+            )
+            synthesis = think_response.choices[0].message.content
+            st.session_state.think_synthesis = synthesis
+
+if "think_synthesis" in st.session_state and st.session_state.think_synthesis:
+    st.info("💭 **Synthesis**")
+    st.markdown(st.session_state.think_synthesis)
+    if st.button("Clear synthesis", key="clear_think"):
+        st.session_state.think_synthesis = None
         st.rerun()
 
 # ========== SUMMARY GENERATION ==========
